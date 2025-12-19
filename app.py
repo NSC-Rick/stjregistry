@@ -6,6 +6,26 @@ st.set_page_config(
     layout="wide",
 )
 
+
+# --- Shared Password Gate ---
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.title("Protected Workspace")
+    pwd = st.text_input("Enter access password", type="password")
+
+    if pwd:
+        if pwd == st.secrets.get("APP_PASSWORD"):
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("Incorrect password")
+
+    st.caption("This workspace is for internal use.")
+    st.stop()
+# --- End Password Gate ---
+
 st.title("NEK Registry")
 
 st.markdown(
