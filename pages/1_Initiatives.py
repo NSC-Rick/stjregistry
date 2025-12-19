@@ -113,14 +113,32 @@ st.divider()
 
 if st.button("💾 Save changes to registry"):
     try:
-        records = edited_df.to_dict(orient="records")
+        records = edited_df.copy()
 
-        # Remove empty IDs so Supabase can create them
-        for r in records:
+        # 1. Normalize column names (defensive)
+        records.columns = [
+            c.strip()
+             .lower()
+             .replace(" ", "_")
+             .replace("-", "_")
+            for c in records.columns
+        ]
+
+        # 2. Drop rows that are completely empty
+        records = records.dropna(how="all")
+
+        # 3. Convert NaN → None for Supabase
+        records = records.where(pd.notnull(records), None)
+
+        payload = records.to_dict(orient="records")
+
+        # 4. Remove empty IDs so Supabase can create them
+        for r in payload:
             if not r.get("id"):
                 r.pop("id", None)
 
-        supabase.table("initiatives").upsert(records).execute()
+        # 5. Upsert
+        supabase.table("initiatives").upsert(payload).execute()
 
         load_initiatives.clear()
         st.success("Registry updated successfully.")
@@ -128,6 +146,7 @@ if st.button("💾 Save changes to registry"):
     except Exception as e:
         st.error("Failed to save changes.")
         st.exception(e)
+
 
 # ------------------------------------------------------------
 # Guidance
