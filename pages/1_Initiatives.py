@@ -2,58 +2,67 @@ import pandas as pd
 import streamlit as st
 
 
-st.title("NEK Initiative Registry")
+st.title("NEK Entrepreneurial Initiative Registry")
 
-st.markdown(
+
+st.write(
     """
-The NEK Initiative Registry is a simple, shared list of initiatives happening across the region.
-It is meant to help residents, partners, and stewards understand what work is underway, who is leading it,
-and when it was last checked in.
-
-This page uses sample, in-memory data only.
-"""
+    This registry tracks active, proposed, and completed initiatives
+    supporting the NEK entrepreneurial ecosystem.
+    """
 )
 
-records = [
+# --- Sample data (MVP only) ---
+data = [
     {
-        "Initiative Name": "Main Street Winter Walkability",
-        "Description": "Improve winter sidewalk access and maintenance guidance for downtown routes.",
-        "Region": "St. Johnsbury",
+        "Initiative Name": "NEK Entrepreneur Roundtables",
+        "Region": "NEK-wide",
         "Status": "Active",
-        "Lead Steward": "Town Public Works",
-        "Last Check-in": "2025-12-05",
+        "Lead Steward": "Rick",
+        "Last Check-In": date(2025, 1, 10),
+        "Next Check-In": date(2025, 2, 10),
+        "Notes": "Monthly facilitator rotation working well."
     },
     {
-        "Initiative Name": "NEK Local Food Mapping",
-        "Description": "Create a shared map of producers, markets, and aggregation points.",
-        "Region": "Northeast Kingdom",
+        "Initiative Name": "Downtown Startup Pop-Ups",
+        "Region": "St. Johnsbury",
         "Status": "Proposed",
-        "Lead Steward": "Regional Food Coalition",
-        "Last Check-in": "2025-11-18",
-    },
-    {
-        "Initiative Name": "Downtown Vacancy Snapshot",
-        "Description": "Track storefront vacancies monthly to support targeted revitalization efforts.",
-        "Region": "Newport",
-        "Status": "Paused",
-        "Lead Steward": "City Planning",
-        "Last Check-in": "2025-10-22",
-    },
-    {
-        "Initiative Name": "Community Solar Outreach",
-        "Description": "Coordinate outreach sessions for enrollment in community solar programs.",
-        "Region": "Hardwick",
-        "Status": "Completed",
-        "Lead Steward": "Energy Committee",
-        "Last Check-in": "2025-09-30",
-    },
+        "Lead Steward": "TBD",
+        "Last Check-In": None,
+        "Next Check-In": None,
+        "Notes": ""
+    }
 ]
 
-df = pd.DataFrame.from_records(records)
+df = pd.DataFrame(data)
 
-status_options = ["All", "Proposed", "Active", "Paused", "Completed"]
-selected_status = st.selectbox("Filter by Status", options=status_options, index=0)
+# --- Status filter ---
+status_filter = st.selectbox(
+    "Filter by status",
+    ["All", "Proposed", "Active", "Paused", "Completed"]
+)
 
-filtered_df = df if selected_status == "All" else df[df["Status"] == selected_status]
+if status_filter != "All":
+    df = df[df["Status"] == status_filter]
 
-st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+st.subheader("Editable Initiative Table")
+
+edited_df = st.data_editor(
+    df,
+    num_rows="dynamic",
+    use_container_width=True,
+    column_config={
+        "Status": st.column_config.SelectboxColumn(
+            options=["Proposed", "Active", "Paused", "Completed"]
+        ),
+        "Last Check-In": st.column_config.DateColumn(),
+        "Next Check-In": st.column_config.DateColumn(),
+        "Notes": st.column_config.TextColumn()
+    },
+    disabled=["Initiative Name"]
+)
+
+# --- Save action (MVP placeholder) ---
+if st.button("Save changes"):
+    st.success("Changes captured (in-memory for now).")
+    st.caption("In the next phase, this will persist to a database.")

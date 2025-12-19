@@ -1,7 +1,7 @@
 import streamlit as st
 
 
-st.title("Downtown Business Registry")
+st.title("St Johnsbury Downtown Business Registry")
 
 st.markdown(
     """
