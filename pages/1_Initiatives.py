@@ -60,7 +60,7 @@ edited_df = st.data_editor(
         "Next Check-In": st.column_config.DateColumn(),
         "Notes": st.column_config.TextColumn()
     },
-    disabled=["Initiative Name"]
+    #disabled=["Initiative Name"]
 )
 
 # --- Save action (MVP placeholder) ---
