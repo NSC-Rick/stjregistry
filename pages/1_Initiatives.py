@@ -31,7 +31,14 @@ supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 @st.cache_data(ttl=60)
 def load_initiatives():
     resp = supabase.table("initiatives").select("*").order("initiative_name").execute()
-    return pd.DataFrame(resp.data or [])
+    df = pd.DataFrame(resp.data or [])
+
+    # 🔑 CRITICAL: Normalize date columns for Streamlit
+    for col in ["last_check_in", "next_check_in"]:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors="coerce").dt.date
+
+    return df
 
 df = load_initiatives()
 
@@ -104,13 +111,13 @@ if st.button("💾 Save changes to registry"):
     try:
         work = edited_df.copy()
 
-        # Normalize column names defensively
+        # Normalize column names
         work.columns = [
             c.strip().lower().replace(" ", "_").replace("-", "_")
             for c in work.columns
         ]
 
-        # Drop completely empty rows (phantom editor rows)
+        # Drop empty rows
         work = work.dropna(how="all")
 
         # Convert NaN -> None
@@ -123,8 +130,6 @@ if st.button("💾 Save changes to registry"):
 
         for r in records:
             raw_id = r.get("id")
-
-            # Treat empty strings as missing IDs
             if raw_id and str(raw_id).strip():
                 to_update.append(r)
             else:
