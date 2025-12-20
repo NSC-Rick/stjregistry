@@ -3,7 +3,7 @@
 import streamlit as st
 import pandas as pd
 from supabase import create_client
-from datetime import date
+import datetime as dt
 
 st.set_page_config(page_title="Initiatives", layout="wide")
 
@@ -33,49 +33,119 @@ def load_initiatives():
     resp = supabase.table("initiatives").select("*").order("initiative_name").execute()
     df = pd.DataFrame(resp.data or [])
 
-    # 🔑 CRITICAL: Normalize date columns for Streamlit
+    # Normalize date columns for Streamlit
     for col in ["last_check_in", "next_check_in"]:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors="coerce").dt.date
 
     return df
 
-df = load_initiatives()
 
-if df.empty:
-    df = pd.DataFrame(
-        columns=[
-            "id",
-            "initiative_name",
-            "region",
-            "status",
-            "lead_steward",
-            "last_check_in",
-            "next_check_in",
-            "notes",
-            "updated_at",
-        ]
-    )
+df_all = load_initiatives()
+
+# Ensure expected columns exist even if empty
+expected_cols = [
+    "id",
+    "initiative_name",
+    "region",
+    "status",
+    "lead_steward",
+    "last_check_in",
+    "next_check_in",
+    "notes",
+    "updated_at",
+]
+if df_all.empty:
+    df_all = pd.DataFrame(columns=expected_cols)
+else:
+    for c in expected_cols:
+        if c not in df_all.columns:
+            df_all[c] = None
 
 # -------------------------
-# Status filter
+# Dashboard Metrics (calm, useful)
 # -------------------------
-status_options = ["All"] + sorted(
-    [s for s in df["status"].dropna().unique()]
-)
+today = dt.date.today()
+due_window_days = 14
 
-selected_status = st.selectbox("Filter by status", status_options)
+# Define "active-ish" as things we still care to review
+activeish_statuses = ["Active", "Proposed"]
 
+activeish_df = df_all[df_all["status"].isin(activeish_statuses)]
+
+overdue_df = df_all[
+    (df_all["status"].isin(activeish_statuses))
+    & (df_all["next_check_in"].notna())
+    & (df_all["next_check_in"] < today)
+].copy()
+
+due_soon_df = df_all[
+    (df_all["status"].isin(activeish_statuses))
+    & (df_all["next_check_in"].notna())
+    & (df_all["next_check_in"] >= today)
+    & (df_all["next_check_in"] <= (today + dt.timedelta(days=due_window_days)))
+].copy()
+
+recent_df = df_all[
+    (df_all["last_check_in"].notna())
+    & (df_all["last_check_in"] >= (today - dt.timedelta(days=30)))
+].copy()
+
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Active / Proposed", int(len(activeish_df)))
+c2.metric("Overdue", int(len(overdue_df)))
+c3.metric(f"Due Soon ({due_window_days}d)", int(len(due_soon_df)))
+c4.metric("Updated (30d)", int(len(recent_df)))
+
+st.divider()
+
+# -------------------------
+# Needs Attention Panel
+# -------------------------
+st.subheader("Needs Attention")
+
+show_due_soon = st.checkbox("Show due-soon items (in addition to overdue)", value=True)
+
+cols_focus = ["initiative_name", "region", "lead_steward", "status", "next_check_in", "last_check_in"]
+
+if len(overdue_df) == 0 and (not show_due_soon or len(due_soon_df) == 0):
+    st.info("Nothing urgent right now — no overdue items (and none due soon, if enabled).")
+else:
+    if len(overdue_df) > 0:
+        st.markdown("**Overdue** (next check-in date has passed)")
+        st.dataframe(
+            overdue_df[cols_focus].sort_values(by=["next_check_in", "initiative_name"], na_position="last"),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    if show_due_soon and len(due_soon_df) > 0:
+        st.markdown(f"**Due Soon** (next {due_window_days} days)")
+        st.dataframe(
+            due_soon_df[cols_focus].sort_values(by=["next_check_in", "initiative_name"], na_position="last"),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+st.divider()
+
+# -------------------------
+# Filters (for the editable working table)
+# -------------------------
+st.subheader("Initiatives (Editable)")
+
+status_choices = ["All", "Proposed", "Active", "Paused", "Completed"]
+selected_status = st.selectbox("Filter by status", status_choices, index=0)
+
+df = df_all.copy()
 if selected_status != "All":
     df = df[df["status"] == selected_status]
 
-# -------------------------
-# Editable table
-# -------------------------
-st.subheader("Initiatives")
+# Use a stable copy for the editor
+base_df = df.reset_index(drop=True).copy()
 
 edited_df = st.data_editor(
-    df,
+    base_df,
     num_rows="dynamic",
     use_container_width=True,
     column_config={
@@ -92,6 +162,7 @@ edited_df = st.data_editor(
         "status": st.column_config.SelectboxColumn(
             "Status",
             options=["Proposed", "Active", "Paused", "Completed"],
+            required=True,
         ),
         "lead_steward": st.column_config.TextColumn("Lead Steward"),
         "last_check_in": st.column_config.DateColumn("Last Check-In"),
@@ -105,32 +176,45 @@ edited_df = st.data_editor(
 )
 
 # -------------------------
-# Save logic
+# Save logic (robust, Supabase-safe)
 # -------------------------
 if st.button("💾 Save changes to registry"):
     try:
         work = edited_df.copy()
 
-        # Normalize column names
+        # Normalize column names defensively
         work.columns = [
             c.strip().lower().replace(" ", "_").replace("-", "_")
             for c in work.columns
         ]
 
-        # Drop empty rows
+        # Drop completely empty rows (phantom editor row)
         work = work.dropna(how="all")
 
-        # Convert NaN -> None
+        # Convert NaN -> None (but keep date objects for now)
         work = work.where(pd.notnull(work), None)
 
+        # Keep payload strictly to known columns (avoid overwriting updated_at etc.)
+        allowed_cols = {
+            "id",
+            "initiative_name",
+            "region",
+            "status",
+            "lead_steward",
+            "last_check_in",
+            "next_check_in",
+            "notes",
+        }
+        work = work[[c for c in work.columns if c in allowed_cols]]
+
         records = work.to_dict(orient="records")
-        # Convert date objects to ISO strings for Supabase
+
+        # Convert date objects -> ISO strings, and NaT/NaN -> None
         for r in records:
-            for k, v in r.items():
+            for k, v in list(r.items()):
                 if pd.isna(v):
                     r[k] = None
-                # Python date -> ISO string
-                elif isinstance(v, date):
+                elif isinstance(v, dt.date):
                     r[k] = v.isoformat()
 
         to_update = []
@@ -138,6 +222,8 @@ if st.button("💾 Save changes to registry"):
 
         for r in records:
             raw_id = r.get("id")
+
+            # Empty string IDs should be treated as missing IDs
             if raw_id and str(raw_id).strip():
                 to_update.append(r)
             else:
@@ -158,6 +244,5 @@ if st.button("💾 Save changes to registry"):
         st.exception(e)
 
 st.caption(
-    "Tip: Initiative names should be changed deliberately once in use. "
-    "Persistent storage is provided by Supabase."
+    "Tip: Keep 'next check-in' dates lightweight — the dashboard will surface overdue and due-soon items automatically."
 )
