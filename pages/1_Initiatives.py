@@ -115,7 +115,6 @@ if st.button("💾 Save changes to registry"):
     try:
         work = edited_df.copy()
 
-        # 🔑 CRITICAL: eliminate NaT before JSON serialization
         work = work.where(pd.notnull(work), None)
 
         work.columns = [
@@ -139,9 +138,14 @@ if st.button("💾 Save changes to registry"):
 
         records = work.to_dict(orient="records")
 
+        # ✅ FINAL, CORRECT serialization
         for r in records:
             for k, v in list(r.items()):
-                if isinstance(v, pd.Timestamp):
+                if v is None:
+                    continue
+                if pd.isna(v):
+                    r[k] = None
+                elif isinstance(v, pd.Timestamp):
                     r[k] = v.date().isoformat()
 
         to_update, to_insert = [], []
