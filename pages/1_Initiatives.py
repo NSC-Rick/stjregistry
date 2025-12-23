@@ -33,7 +33,6 @@ def load_initiatives():
     resp = supabase.table("initiatives").select("*").order("initiative_name").execute()
     df = pd.DataFrame(resp.data or [])
 
-    # Normalize date columns
     for col in ["last_check_in", "next_check_in"]:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors="coerce")
@@ -43,7 +42,6 @@ def load_initiatives():
 
 df_all = load_initiatives()
 
-# Ensure expected columns exist
 expected_cols = [
     "id",
     "initiative_name",
@@ -64,7 +62,7 @@ else:
             df_all[c] = pd.NaT if "check_in" in c else None
 
 # -------------------------
-# Filters (editable table)
+# Filters
 # -------------------------
 st.subheader("Initiatives (Editable)")
 
@@ -78,23 +76,20 @@ if selected_status != "All":
 base_df = df.reset_index(drop=True).copy()
 
 # -------------------------
-# Hide system ID from UI
+# Hide system ID
 # -------------------------
 row_ids = base_df["id"] if "id" in base_df.columns else None
 base_df = base_df.drop(columns=["id"], errors="ignore")
 
 # -------------------------
-# Editable table
+# Editor
 # -------------------------
 edited_df = st.data_editor(
     base_df,
     num_rows="dynamic",
     use_container_width=True,
     column_config={
-        "initiative_name": st.column_config.TextColumn(
-            "Initiative Name",
-            required=True,
-        ),
+        "initiative_name": st.column_config.TextColumn("Initiative Name", required=True),
         "region": st.column_config.TextColumn("Region"),
         "status": st.column_config.SelectboxColumn(
             "Status",
@@ -105,23 +100,23 @@ edited_df = st.data_editor(
         "last_check_in": st.column_config.DateColumn("Last Check-In"),
         "next_check_in": st.column_config.DateColumn("Next Check-In"),
         "notes": st.column_config.TextColumn("Notes"),
-        "updated_at": st.column_config.TextColumn(
-            "updated_at",
-            disabled=True,
-        ),
+        "updated_at": st.column_config.TextColumn("updated_at", disabled=True),
     },
 )
 
-# Reattach hidden IDs for save logic
+# Reattach IDs
 if row_ids is not None:
     edited_df.insert(0, "id", row_ids)
 
 # -------------------------
-# Save logic (Supabase-safe)
+# Save logic
 # -------------------------
 if st.button("💾 Save changes to registry"):
     try:
         work = edited_df.copy()
+
+        # 🔑 CRITICAL: eliminate NaT before JSON serialization
+        work = work.where(pd.notnull(work), None)
 
         work.columns = [
             c.strip().lower().replace(" ", "_").replace("-", "_")
@@ -129,7 +124,6 @@ if st.button("💾 Save changes to registry"):
         ]
 
         work = work.dropna(how="all")
-        work = work.where(pd.notnull(work), None)
 
         allowed_cols = {
             "id",
@@ -145,14 +139,12 @@ if st.button("💾 Save changes to registry"):
 
         records = work.to_dict(orient="records")
 
-        # Convert pandas timestamps to ISO dates
         for r in records:
             for k, v in list(r.items()):
                 if isinstance(v, pd.Timestamp):
                     r[k] = v.date().isoformat()
 
-        to_update = []
-        to_insert = []
+        to_update, to_insert = [], []
 
         for r in records:
             if r.get("id"):
